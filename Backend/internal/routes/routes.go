@@ -55,6 +55,8 @@ func SetupAuthRoutes(router *gin.Engine, authHandler *handler.AuthHandler, chatH
 				chat.POST("/search", chatHandler.SearchMessages)
 				chat.POST("/sync", chatHandler.SyncMessages)
 				chat.POST("/pull", chatHandler.PullMessages)
+				chat.POST("/messages/delete", chatHandler.DeleteMessages)
+				chat.POST("/history/clear", chatHandler.ClearChatHistory)
 			}
 
 			// Payment routes

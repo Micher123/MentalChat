@@ -490,6 +490,35 @@ func (s *Storage) UpdateEmailLog(log *model.EmailLog) error {
 	return s.db.Save(log).Error
 }
 
+// ---- Delete message operations ----
+
+// DeleteMessage removes a single message if it belongs to the user
+func (s *Storage) DeleteMessage(userID uint, messageID uint) error {
+	result := s.db.Where("id = ? AND user_id = ?", messageID, userID).Delete(&model.Message{})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		return gorm.ErrRecordNotFound
+	}
+	return nil
+}
+
+// DeleteMessages removes multiple messages belonging to the user
+func (s *Storage) DeleteMessages(userID uint, messageIDs []uint) error {
+	if len(messageIDs) == 0 {
+		return nil
+	}
+	result := s.db.Where("id IN ? AND user_id = ?", messageIDs, userID).Delete(&model.Message{})
+	return result.Error
+}
+
+// ClearChatHistory removes all messages for a user's specific chat type
+func (s *Storage) ClearChatHistory(userID uint, chatType string) error {
+	result := s.db.Where("user_id = ? AND chat_type = ?", userID, chatType).Delete(&model.Message{})
+	return result.Error
+}
+
 // ---- Subscription operations ----
 
 func (s *Storage) CreateSubscription(subscription *model.Subscription) error {

@@ -114,8 +114,11 @@ func (mqs *MessageQueueService) Enqueue(userID uint, chatType, content, deviceID
 		}
 		mqs.mu.Unlock()
 
-		res := <-ch
-		return res.message, res.userMsg, res.err
+		// Wait for the first caller's AI result, but do NOT return the AI message
+		// to the client (otherwise every queued caller sends the same AI reply).
+		<-ch
+		// Return nil for message so the handler sends a "queued" response.
+		return nil, nil, nil
 	}
 
 	// Not processing — start processing immediately.
@@ -140,15 +143,38 @@ func (mqs *MessageQueueService) Enqueue(userID uint, chatType, content, deviceID
 	mqs.mu.Unlock()
 
 	if hasPending && len(pending.messages) > 0 {
-		// Process accumulated messages.
+		// Save pending messages as user messages only (do NOT call AI again).
+		// They piggyback on the AI response from the first batch.
 		joined := strings.Join(pending.messages, "\n")
+		now := time.Now()
 		log.Debug().
 			Uint("user_id", userID).
 			Str("chat_type", chatType).
 			Int("pending_count", len(pending.messages)).
-			Msg("Processing queued messages")
+			Msg("Saving queued messages as user-only (no separate AI call)")
 
-		_ = mqs.processBatch(key, []string{joined}, userID, chatType, deviceID, userTier)
+		if mqs.chatIndex != nil {
+			backendLocalID := -now.UnixNano()
+			_, _, err := mqs.chatIndex.IndexAndStoreMessage(userID, chatType, joined, "user", false, backendLocalID, deviceID)
+			if err != nil {
+				log.Err(err).Msg("Failed to save queued user message")
+			}
+		} else {
+			userMsg := &model.Message{
+				UserID:      userID,
+				ChatType:    chatType,
+				Content:     joined,
+				ContentHash: hashContent(joined),
+				IsFromAI:    false,
+				Role:        "user",
+				DeviceID:    deviceID,
+				Timestamp:   now,
+				CreatedAt:   now,
+			}
+			if err := mqs.store.CreateMessage(userMsg); err != nil {
+				log.Err(err).Msg("Failed to save queued user message")
+			}
+		}
 	}
 
 	return result.message, result.userMsg, result.err
@@ -192,26 +218,40 @@ func (mqs *MessageQueueService) processBatch(key string, messages []string, user
 		}
 	}
 
-	// Build context from recent chat history.
-	contextHistory, _, err := mqs.contextBuilder.BuildContext(userID, chatType, joined)
-	if err != nil {
-		log.Err(err).Msg("Failed to build context")
-		// Non-fatal — continue without context.
-		contextHistory = ""
-	}
+	// Check if the message is relevant to the service themes.
+	// If not, return a fixed "I can't help with that" message instead of calling AI.
+	var aiResponse string
+	if !mqs.aiService.CheckContext(joined) {
+		log.Info().
+			Uint("user_id", userID).
+			Str("chat_type", chatType).
+			Str("content", joined).
+			Msg("Message filtered: not relevant to service themes")
+		aiResponse = "Я не знаю, как помочь тебе с этим вопросом."
+	} else {
+		// Build context from recent chat history.
+		contextHistory, _, err := mqs.contextBuilder.BuildContext(userID, chatType, joined)
+		if err != nil {
+			log.Err(err).Msg("Failed to build context")
+			// Non-fatal — continue without context.
+			contextHistory = ""
+		}
 
-	// Call AI.
-	aiResponse, err := mqs.aiService.GetAIResponseWithContext(joined, chatType, userTier, contextHistory)
-	if err != nil {
-		log.Err(err).Msg("AI response failed")
-		return queueResult{err: fmt.Errorf("AI response failed: %w", err)}
+		// Call AI.
+		var aiErr error
+		aiResponse, aiErr = mqs.aiService.GetAIResponseWithContext(joined, chatType, userTier, contextHistory)
+		if aiErr != nil {
+			log.Err(aiErr).Msg("AI response failed")
+			return queueResult{err: fmt.Errorf("AI response failed: %w", aiErr)}
+		}
 	}
 
 	// Save AI response and index for search (one call, no duplicate).
 	var aiMsg *model.Message
 	if mqs.chatIndex != nil {
-		var stored bool
 		backendLocalID := -now.UnixNano() - 1 // ensure different from user message local_id
+		var stored bool
+		var err error
 		aiMsg, stored, err = mqs.chatIndex.IndexAndStoreMessage(userID, chatType, aiResponse, "ai", true, backendLocalID, deviceID)
 		if err != nil {
 			log.Err(err).Msg("Failed to index & store AI message")
@@ -233,9 +273,10 @@ func (mqs *MessageQueueService) processBatch(key string, messages []string, user
 			Timestamp:   now,
 			CreatedAt:   now,
 		}
-		if err := mqs.store.CreateMessage(aiMsg); err != nil {
-			log.Err(err).Msg("Failed to save AI message")
-			return queueResult{err: fmt.Errorf("failed to save AI message: %w", err)}
+		storeErr := mqs.store.CreateMessage(aiMsg)
+		if storeErr != nil {
+			log.Err(storeErr).Msg("Failed to save AI message")
+			return queueResult{err: fmt.Errorf("failed to save AI message: %w", storeErr)}
 		}
 	}
 

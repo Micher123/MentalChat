@@ -265,6 +265,29 @@ class ChatSyncService {
     }
   }
 
+  async deleteLocalMessage(messageId: number) {
+    if (!this.db) return
+    await this.db!.delete('messages', messageId)
+    console.log('🗑️ ChatSyncService: Local message deleted', messageId)
+  }
+
+  async deleteLocalMessages(messageIds: number[]) {
+    if (!this.db) return
+    for (const id of messageIds) {
+      await this.db!.delete('messages', id)
+    }
+    console.log(`🗑️ ChatSyncService: ${messageIds.length} local messages deleted`)
+  }
+
+  async clearLocalChatMessages(chatId: string) {
+    if (!this.db) return
+    const messages = await this.db!.getAllFromIndex('messages', 'by-chat', chatId)
+    for (const msg of (messages as ChatMessage[])) {
+      await this.db!.delete('messages', msg.id)
+    }
+    console.log(`🗑️ ChatSyncService: All messages cleared for chat ${chatId}`)
+  }
+
   async clearAll() {
     if (!this.db) return
     await this.db!.clear('chats')

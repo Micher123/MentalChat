@@ -362,6 +362,8 @@ const useAppStore = create<AppState>()(
     {
       name: 'mentalchat-storage',
       partialize: (state) => ({
+        token: state.token,
+        isAuthenticated: state.isAuthenticated,
         user: state.user,
         theme: state.theme,
         microphonePerm: state.microphonePerm,
