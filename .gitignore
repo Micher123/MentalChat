@@ -1,0 +1,63 @@
+# ======== Конфиденциальные данные ========
+.env.json
+.env
+*.env.local
+*.env.production
+*.env.staging
+Backend/.env.json
+Backend/.env
+
+# ======== Файлы индексации проекта ========
+PROJECT_INDEX.md
+.plan.md
+
+# ======== Сборка и кэш ========
+# Go
+Backend/mentalchat
+Backend/mentalchat.exe
+Backend/vendor/
+*.exe
+*.test
+*.out
+
+# Node / Frontend
+Frontend/node_modules/
+Frontend/dist/
+Frontend/.vite/
+*.tsbuildinfo
+
+# Билд целиком
+build/
+dist/
+out/
+
+# ======== IDE и редакторы ========
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ======== Логи и временные файлы ========
+*.log
+logs/
+tmp/
+temp/
+*.tmp
+*.bak
+
+# ======== OS files ========
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# ======== Тестовые артефакты ========
+coverage/
+*.coverage
+test-results/
