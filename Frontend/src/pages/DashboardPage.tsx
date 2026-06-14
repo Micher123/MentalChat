@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import useAppStore, { themes } from '../store/useAppStore'
 import VoiceInputButton from '../components/VoiceInputButton'
-import { StrawberryIcon, BrainIcon, CardsIcon, MysticOrbIcon, ClosedBookIcon, OpenBookIcon } from '../components/DeveloperIcons'
+import { StrawberryIcon, BrainIcon, CardsIcon, MysticOrbIcon, ClosedBookIcon, OpenBookIcon, UserIcon } from '../components/DeveloperIcons'
 import { chatSyncService } from '../services/chatSyncService'
 import { useChatSync } from '../hooks/useChatSync'
 
@@ -20,8 +20,10 @@ const DashboardPage = () => {
   const [localChats, setLocalChats] = useState<any[]>([])
   const [localMessages, setLocalMessages] = useState<any[]>([])
   const [showSettings, setShowSettings] = useState(false)
+  const [showProfile, setShowProfile] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const settingsPanelRef = useRef<HTMLDivElement>(null)
+  const profilePanelRef = useRef<HTMLDivElement>(null)
 
   const currentChatHistory = chatHistories[currentChatType] || []
 
@@ -126,6 +128,18 @@ const DashboardPage = () => {
     document.addEventListener('mousedown', handleClickOutside)
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [showSettings])
+
+  // Закрытие панели профиля при клике вне её
+  useEffect(() => {
+    if (!showProfile) return
+    const handleClickOutside = (e: MouseEvent) => {
+      if (profilePanelRef.current && !profilePanelRef.current.contains(e.target as Node)) {
+        setShowProfile(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [showProfile])
 
   // Закрытие локальной истории при сворачивании сайдбара
   useEffect(() => {
@@ -393,9 +407,23 @@ const DashboardPage = () => {
 
         </div>
 
-        {/* Настройки — прижаты к низу сайдбара, центрированы */}
+        {/* Настройки и профиль — прижаты к низу сайдбара, центрированы */}
         <div className="relative p-2 border-t" style={{ borderColor: theme.borderLight }}>
           <div className="flex flex-col items-center">
+            {/* Кнопка профиля */}
+            <button
+              onClick={() => { if (sidebarOpen) setShowProfile(!showProfile) }}
+              className="flex items-center justify-center gap-2 p-2 rounded-xl hover-bg-theme-light transition-colors mb-1"
+              title={sidebarOpen ? undefined : 'Профиль'}
+              style={{ color: theme.textSecondary }}
+            >
+              <span className="w-6 h-6 flex-shrink-0">
+                <UserIcon className="w-6 h-6" />
+              </span>
+              {sidebarOpen && <span className="text-xs font-semibold uppercase tracking-wider">Профиль</span>}
+            </button>
+
+            {/* Кнопка настроек */}
             <button
               onClick={() => setShowSettings(!showSettings)}
               className="flex items-center justify-center gap-2 p-2 rounded-xl hover-bg-theme-light transition-colors"
@@ -408,6 +436,59 @@ const DashboardPage = () => {
               </svg>
               {sidebarOpen && <span className="text-xs font-semibold uppercase tracking-wider">Настройки</span>}
             </button>
+
+            {/* Панель профиля */}
+            {sidebarOpen && showProfile && user && (
+              <div 
+                ref={profilePanelRef}
+                className="absolute bottom-full left-2 right-2 mb-2 p-4 backdrop-blur-lg rounded-2xl space-y-3 shadow-xl"
+                style={{ backgroundColor: theme.surface }}
+              >
+                <h3 className="text-sm font-semibold" style={{ color: theme.textPrimary }}>
+                  {user.displayName || 'Пользователь'}
+                </h3>
+                <div className="text-xs space-y-1" style={{ color: theme.textSecondary }}>
+                  <p>Почта: {user.email}</p>
+                  <p>
+                    Тариф:{' '}
+                    <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-semibold ${
+                      user.tier === 'pro' ? 'bg-purple-100 text-purple-700' :
+                      user.tier === 'ultra' ? 'bg-amber-100 text-amber-700' :
+                      'bg-gray-100 text-gray-600'
+                    }`}>
+                      {user.tier?.toUpperCase() || 'FREE'}
+                    </span>
+                  </p>
+                </div>
+                <div className="space-y-2 pt-1">
+                  <button
+                    onClick={() => {
+                      setShowProfile(false)
+                      navigate('/subscription')
+                    }}
+                    className="w-full py-2.5 rounded-xl font-semibold text-sm transition-colors"
+                    style={{ backgroundColor: theme.primary, color: theme.textOnPrimary }}
+                  >
+                    Upgrade profile
+                  </button>
+                  <button
+                    onClick={() => {
+                      if (confirm('Вы уверены, что хотите удалить профиль? Это действие необратимо.')) {
+                        // TODO: вызвать API удаления
+                        localStorage.removeItem('token')
+                        navigate('/login')
+                      }
+                    }}
+                    className="w-full py-2.5 rounded-xl font-semibold text-sm transition-colors"
+                    style={{ color: theme.dangerText }}
+                    onMouseEnter={(e) => e.currentTarget.style.backgroundColor = theme.dangerHover}
+                    onMouseLeave={(e) => e.currentTarget.style.backgroundColor = 'transparent'}
+                  >
+                    Удалить профиль
+                  </button>
+                </div>
+              </div>
+            )}
 
             {sidebarOpen && showSettings && (
               <div 
