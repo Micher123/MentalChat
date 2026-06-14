@@ -4,6 +4,7 @@ import WelcomeModal from './components/WelcomeModal'
 import RegistrationPage from './pages/RegistrationPage'
 import LoginPage from './pages/LoginPage'
 import DashboardPage from './pages/DashboardPage'
+import SubscriptionPage from './pages/SubscriptionPage'
 import useAppStore from './store/useAppStore'
 
 const App = () => {
@@ -54,6 +55,10 @@ const App = () => {
         <Route
           path="/dashboard"
           element={isAuthenticated ? <DashboardPage /> : <Navigate to="/login" />}
+        />
+        <Route
+          path="/subscription"
+          element={isAuthenticated ? <SubscriptionPage /> : <Navigate to="/login" />}
         />
       </Routes>
     </BrowserRouter>

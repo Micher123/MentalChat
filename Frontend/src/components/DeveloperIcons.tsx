@@ -24,6 +24,37 @@ export function StrawberryIcon({ className }: IconProps) {
   )
 }
 
+export function UserIcon({ className }: IconProps) {
+  return (
+    <svg className={className} viewBox="0 0 120 120" fill="none" role="img">
+      {/* Круг фона */}
+      <circle cx="60" cy="48" r="28" fill="currentColor" opacity="0.15" stroke="currentColor" strokeWidth="3" />
+      {/* Плечи */}
+      <path
+        d="M16 112C16 82 32 64 60 64C88 64 104 82 104 112"
+        fill="currentColor"
+        opacity="0.15"
+        stroke="currentColor"
+        strokeWidth="3"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      {/* Голова */}
+      <circle cx="60" cy="44" r="22" fill="currentColor" opacity="0.15" stroke="currentColor" strokeWidth="3" />
+      {/* Глаза */}
+      <circle cx="52" cy="42" r="4" fill="currentColor" />
+      <circle cx="68" cy="42" r="4" fill="currentColor" />
+      {/* Улыбка */}
+      <path
+        d="M52 50C54 54 66 54 68 50"
+        stroke="currentColor"
+        strokeWidth="2.5"
+        strokeLinecap="round"
+      />
+    </svg>
+  )
+}
+
 export function BrainIcon({ className }: IconProps) {
   return (
     <svg className={className} viewBox="0 0 120 120" fill="none" role="img">
