@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MentalChat - Fingerprinting Test</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+        .container {
+            background: white;
+            border-radius: 20px;
+            padding: 30px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+        h1 {
+            color: #667eea;
+            text-align: center;
+            margin-bottom: 10px;
+        }
+        .subtitle {
+            text-align: center;
+            color: #666;
+            margin-bottom: 30px;
+        }
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 10px;
+            font-size: 16px;
+            cursor: pointer;
+            display: block;
+            margin: 20px auto;
+            transition: transform 0.2s;
+        }
+        button:hover {
+            transform: scale(1.05);
+        }
+        button:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+        }
+        .result {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 20px;
+            margin-top: 20px;
+            display: none;
+        }
+        .result.show {
+            display: block;
+        }
+        .fingerprint {
+            font-family: 'Courier New', monospace;
+            background: #2d3748;
+            color: #68d391;
+            padding: 15px;
+            border-radius: 8px;
+            font-size: 14px;
+            word-break: break-all;
+            margin: 10px 0;
+        }
+        .data-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+        .data-item {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            border-left: 4px solid #667eea;
+        }
+        .data-label {
+            font-weight: bold;
+            color: #666;
+            font-size: 12px;
+            text-transform: uppercase;
+        }
+        .data-value {
+            color: #2d3748;
+            font-size: 14px;
+            margin-top: 5px;
+        }
+        .status {
+            display: inline-block;
+            padding: 5px 15px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: bold;
+            margin-left: 10px;
+        }
+        .status.success {
+            background: #c6f6d5;
+            color: #22543d;
+        }
+        .status.error {
+            background: #fed7d7;
+            color: #742a2a;
+        }
+        .status.loading {
+            background: #feebc8;
+            color: #744210;
+        }
+        .hash-section {
+            background: #edf2f7;
+            padding: 15px;
+            border-radius: 8px;
+            margin: 10px 0;
+        }
+        .hash-title {
+            font-weight: bold;
+            color: #4a5568;
+            margin-bottom: 10px;
+        }
+        pre {
+            background: #1a202c;
+            color: #68d391;
+            padding: 15px;
+            border-radius: 8px;
+            overflow-x: auto;
+            font-size: 12px;
+        }
+        .test-section {
+            border: 2px solid #e2e8f0;
+            border-radius: 10px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        .test-section h3 {
+            color: #667eea;
+            margin-top: 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔐 MentalChat Fingerprinting Test</h1>
+        <p class="subtitle">Тестирование системы идентификации устройства</p>
+
+        <button id="generateBtn" onclick="generateFingerprint()">
+            🚀 Сгенерировать Fingerprint
+        </button>
+
+        <div id="result" class="result">
+            <h2>📊 Результаты</h2>
+            
+            <div class="fingerprint">
+                <strong>Fingerprint:</strong> <span id="fpHash"></span>
+            </div>
+
+            <div class="data-grid">
+                <div class="data-item">
+                    <div class="data-label">User Agent</div>
+                    <div class="data-value" id="ua"></div>
+                </div>
+                <div class="data-item">
+                    <div class="data-label">Platform</div>
+                    <div class="data-value" id="platform"></div>
+                </div>
+                <div class="data-item">
+                    <div class="data-label">Screen</div>
+                    <div class="data-value" id="screen"></div>
+                </div>
+                <div class="data-item">
+                    <div class="data-label">Timezone</div>
+                    <div class="data-value" id="timezone"></div>
+                </div>
+                <div class="data-item">
+                    <div class="data-label">Language</div>
+                    <div class="data-value" id="language"></div>
+                </div>
+                <div class="data-item">
+                    <div class="data-label">CPU Cores</div>
+                    <div class="data-value" id="cpu"></div>
+                </div>
+                <div class="data-item">
+                    <div class="data-label">Memory (GB)</div>
+                    <div class="data-value" id="memory"></div>
+                </div>
+                <div class="data-item">
+                    <div class="data-label">Cookies</div>
+                    <div class="data-value" id="cookies"></div>
+                </div>
+            </div>
+
+            <div class="hash-section">
+                <div class="hash-title">🎨 Canvas Fingerprint</div>
+                <div class="fingerprint" id="canvasHash"></div>
+            </div>
+
+            <div class="hash-section">
+                <div class="hash-title">🎮 WebGL Fingerprint</div>
+                <div class="fingerprint" id="webglHash"></div>
+            </div>
+
+            <div class="hash-section">
+                <div class="hash-title">🔤 Fonts Fingerprint</div>
+                <div class="fingerprint" id="fontsHash"></div>
+            </div>
+
+            <div class="hash-section">
+                <div class="hash-title">🔌 Plugins Fingerprint</div>
+                <div class="fingerprint" id="pluginsHash"></div>
+            </div>
+
+            <div class="test-section">
+                <h3>🧪 Тест на уникальность</h3>
+                <p>Нажмите кнопку несколько раз - fingerprint должен быть одинаковым:</p>
+                <div id="uniquenessTest"></div>
+            </div>
+
+            <div class="test-section">
+                <h3>📡 Отправка на сервер</h3>
+                <p>Тест отправки fingerprint на backend:</p>
+                <button onclick="testServerSend()" id="sendBtn">
+                    📤 Отправить тестовый запрос
+                </button>
+                <div id="serverResponse" style="margin-top: 10px;"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let fingerprints = [];
+
+        async function hashString(str) {
+            const encoder = new TextEncoder();
+            const data = encoder.encode(str);
+            const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+            const hashArray = Array.from(new Uint8Array(hashBuffer));
+            const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+            return hashHex.substring(0, 16);
+        }
+
+        async function getCanvasFingerprint() {
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            if (!ctx) return '';
+            
+            canvas.width = 200;
+            canvas.height = 50;
+            
+            ctx.textBaseline = 'top';
+            ctx.font = '14px Arial';
+            ctx.fillStyle = '#f60';
+            ctx.fillRect(0, 0, 100, 50);
+            ctx.fillStyle = '#069';
+            ctx.fillText('MentalChat 🌸', 2, 15);
+            ctx.fillStyle = 'rgba(102, 204, 0, 0.7)';
+            ctx.fillText('MentalChat 🌸', 4, 35);
+            
+            const dataURL = canvas.toDataURL();
+            return await hashString(dataURL);
+        }
+
+        async function getWebGLFingerprint() {
+            try {
+                const canvas = document.createElement('canvas');
+                const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+                if (!gl) return '';
+                
+                const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+                if (!debugInfo) return '';
+                
+                const vendor = gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL);
+                const renderer = gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL);
+                
+                return await hashString(`${vendor}|${renderer}`);
+            } catch (error) {
+                return '';
+            }
+        }
+
+        async function getFontsFingerprint() {
+            const baseFonts = ['monospace', 'sans-serif', 'serif'];
+            const testFonts = [
+                'Arial', 'Verdana', 'Helvetica', 'Times New Roman', 'Courier New',
+                'Georgia', 'Palatino', 'Garamond', 'Comic Sans MS', 'Trebuchet MS'
+            ];
+            
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            if (!ctx) return '';
+            
+            const detectedFonts = [];
+            
+            for (const testFont of testFonts) {
+                let detected = false;
+                for (const baseFont of baseFonts) {
+                    ctx.font = `72px "${testFont}", ${baseFont}`;
+                    const width = ctx.measureText('MMMMMMMMMM').width;
+                    ctx.font = `72px ${baseFont}`;
+                    const baseWidth = ctx.measureText('MMMMMMMMMM').width;
+                    
+                    if (width !== baseWidth) {
+                        detected = true;
+                        break;
+                    }
+                }
+                if (detected) detectedFonts.push(testFont);
+            }
+            
+            return await hashString(detectedFonts.join(','));
+        }
+
+        async function getPluginsFingerprint() {
+            const plugins = [];
+            for (let i = 0; i < navigator.plugins.length; i++) {
+                const plugin = navigator.plugins[i];
+                plugins.push(`${plugin.name}|${plugin.description}|${plugin.filename}`);
+            }
+            return plugins.length > 0 ? await hashString(plugins.join(',')) : 'no_plugins';
+        }
+
+        async function generateFingerprint() {
+            const btn = document.getElementById('generateBtn');
+            btn.disabled = true;
+            btn.textContent = '⏳ Генерация...';
+
+            const data = {
+                ua: navigator.userAgent,
+                platform: navigator.platform,
+                screen: `${screen.width}x${screen.height} (${screen.colorDepth}bit)`,
+                timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+                language: navigator.language,
+                cpu: navigator.hardwareConcurrency || 'N/A',
+                memory: (navigator.deviceMemory || 'N/A') + ' GB',
+                cookies: navigator.cookieEnabled ? 'Enabled' : 'Disabled'
+            };
+
+            // Generate hashes
+            const canvasHash = await getCanvasFingerprint();
+            const webglHash = await getWebGLFingerprint();
+            const fontsHash = await getFontsFingerprint();
+            const pluginsHash = await getPluginsFingerprint();
+
+            // Create full fingerprint
+            const components = [
+                data.ua,
+                data.platform,
+                data.screen,
+                data.timezone,
+                data.language,
+                data.cpu,
+                data.memory,
+                data.cookies,
+                canvasHash,
+                webglHash,
+                fontsHash,
+                pluginsHash
+            ].join('|');
+
+            const fingerprint = await hashString(components);
+            fingerprints.push(fingerprint);
+
+            // Display results
+            document.getElementById('fpHash').textContent = fingerprint;
+            document.getElementById('ua').textContent = data.ua;
+            document.getElementById('platform').textContent = data.platform;
+            document.getElementById('screen').textContent = data.screen;
+            document.getElementById('timezone').textContent = data.timezone;
+            document.getElementById('language').textContent = data.language;
+            document.getElementById('cpu').textContent = data.cpu;
+            document.getElementById('memory').textContent = data.memory;
+            document.getElementById('cookies').textContent = data.cookies;
+            document.getElementById('canvasHash').textContent = canvasHash;
+            document.getElementById('webglHash').textContent = webglHash;
+            document.getElementById('fontsHash').textContent = fontsHash;
+            document.getElementById('pluginsHash').textContent = pluginsHash;
+
+            document.getElementById('result').classList.add('show');
+            
+            btn.disabled = false;
+            btn.textContent = '🔄 Сгенерировать ещё раз';
+
+            // Uniqueness test
+            const uniquenessDiv = document.getElementById('uniquenessTest');
+            if (fingerprints.length > 1) {
+                const allSame = fingerprints.every(fp => fp === fingerprints[0]);
+                uniquenessDiv.innerHTML = `
+                    <p>Попыток: ${fingerprints.length}</p>
+                    <p>
+                        Результат: 
+                        <span class="status ${allSame ? 'success' : 'error'}">
+                            ${allSame ? '✅ Fingerprint стабильный' : '❌ Fingerprint меняется'}
+                        </span>
+                    </p>
+                `;
+            }
+        }
+
+        async function testServerSend() {
+            const btn = document.getElementById('sendBtn');
+            const responseDiv = document.getElementById('serverResponse');
+            
+            btn.disabled = true;
+            btn.textContent = '⏳ Отправка...';
+
+            const fingerprint = document.getElementById('fpHash').textContent;
+            
+            try {
+                const response = await fetch('/api/v1/auth/register', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        email: `test_${Date.now()}@test.com`,
+                        password: 'testpassword123',
+                        display_name: 'Test User',
+                        mental_state: 'harmony',
+                        marketing_email: false,
+                        privacy_policy: true,
+                        fingerprint: fingerprint,
+                        fingerprint_data: {
+                            test: true,
+                            timestamp: new Date().toISOString()
+                        }
+                    })
+                });
+
+                const data = await response.json();
+                
+                responseDiv.innerHTML = `
+                    <pre>${JSON.stringify(data, null, 2)}</pre>
+                    <p>
+                        Статус: 
+                        <span class="status ${response.ok ? 'success' : 'error'}">
+                            ${response.status} ${response.ok ? '✅' : '❌'}
+                        </span>
+                    </p>
+                `;
+            } catch (error) {
+                responseDiv.innerHTML = `
+                    <p class="status error">❌ Ошибка: ${error.message}</p>
+                    <p>Примечание: Backend должен быть запущен на localhost:8080</p>
+                `;
+            }
+
+            btn.disabled = false;
+            btn.textContent = '📤 Отправить тестовый запрос';
+        }
+    </script>
+</body>
+</html>
