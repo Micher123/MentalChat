@@ -16,14 +16,16 @@ type ChatHandler struct {
 	chatIndexService *service.ChatIndexService
 	contextBuilder   *service.ContextBuilder
 	storage          *storage.Storage
+	messageQueue     *service.MessageQueueService
 }
 
-func NewChatHandler(ai *service.AIService, chatIndex *service.ChatIndexService, ctxBuilder *service.ContextBuilder, storage *storage.Storage) *ChatHandler {
+func NewChatHandler(ai *service.AIService, chatIndex *service.ChatIndexService, ctxBuilder *service.ContextBuilder, storage *storage.Storage, msgQueue *service.MessageQueueService) *ChatHandler {
 	return &ChatHandler{
 		aiService:        ai,
 		chatIndexService: chatIndex,
 		contextBuilder:   ctxBuilder,
 		storage:          storage,
+		messageQueue:     msgQueue,
 	}
 }
 
@@ -49,25 +51,6 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 	}
 	tier := user.Tier
 
-	// Build ultra-compact AI context from history
-	compactContext, _, err := h.contextBuilder.BuildContext(userID, req.ChatType, req.Content)
-	if err != nil {
-		log.Err(err).Msg("Failed to build context, proceeding without")
-		compactContext = ""
-	}
-
-	// Get AI response with context
-	var response string
-	if compactContext != "" {
-		response, err = h.aiService.GetAIResponseWithContext(req.Content, req.ChatType, tier, compactContext)
-	} else {
-		response, err = h.aiService.GetAIResponse(req.Content, req.ChatType, tier)
-	}
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get AI response"})
-		return
-	}
-
 	// Determine device ID from header or fingerprint
 	deviceID := c.GetHeader("X-Device-ID")
 	if deviceID == "" {
@@ -81,25 +64,17 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 		}
 	}()
 
-	// Index and store user message with hash + sequence
-	userMsg, _, err := h.chatIndexService.IndexAndStoreMessage(
-		userID, req.ChatType, req.Content, "user", false, 0, deviceID,
-	)
+	// Use message queue service for debounced, sequential processing
+	aiMsg, userMsg, err := h.messageQueue.Enqueue(userID, req.ChatType, req.Content, deviceID, tier)
 	if err != nil {
-		log.Err(err).Msg("Failed to index user message")
-	}
-
-	// Index and store AI response
-	aiMsg, _, err := h.chatIndexService.IndexAndStoreMessage(
-		userID, req.ChatType, response, "ai", true, 0, deviceID,
-	)
-	if err != nil {
-		log.Err(err).Msg("Failed to index AI message")
+		log.Err(err).Msg("Message queue processing failed")
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to process message"})
+		return
 	}
 
 	// Build response with sequence numbers for client sync
 	resp := gin.H{
-		"message":    response,
+		"message":    aiMsg.Content,
 		"chat_type":  req.ChatType,
 		"is_from_ai": true,
 	}

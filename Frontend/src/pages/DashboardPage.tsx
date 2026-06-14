@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import useAppStore, { themes } from '../store/useAppStore'
 import VoiceInputButton from '../components/VoiceInputButton'
 import { StrawberryIcon, BrainIcon, CardsIcon, MysticOrbIcon, ClosedBookIcon, OpenBookIcon, UserIcon } from '../components/DeveloperIcons'
+import { chatApi } from '../services/api'
 import { chatSyncService } from '../services/chatSyncService'
 import { useChatSync } from '../hooks/useChatSync'
 
@@ -12,6 +13,8 @@ const DashboardPage = () => {
 
   const [inputMessage, setInputMessage] = useState('')
   const [loading, setLoading] = useState(false)
+  const [typingState, setTypingState] = useState<'idle' | 'entering' | 'visible' | 'exiting'>('idle')
+  const typingMinTimeRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [chatSessions, setChatSessions] = useState<any[]>([])
   const [sidebarOpen, setSidebarOpen] = useState(true)
   const [searchTerm, setSearchTerm] = useState('')
@@ -141,6 +144,16 @@ const DashboardPage = () => {
     return () => document.removeEventListener('mousedown', handleClickOutside)
   }, [showProfile])
 
+  // Слушатель 401 → мягкий редирект через React Router
+  useEffect(() => {
+    const handleUnauthorized = () => {
+      useAppStore.getState().setAuthenticated(false)
+      navigate('/login')
+    }
+    window.addEventListener('auth:unauthorized', handleUnauthorized)
+    return () => window.removeEventListener('auth:unauthorized', handleUnauthorized)
+  }, [navigate])
+
   // Закрытие локальной истории при сворачивании сайдбара
   useEffect(() => {
     if (!sidebarOpen) setShowLocalHistory(false)
@@ -166,7 +179,21 @@ const DashboardPage = () => {
   const handleSendMessage = async () => {
     if (!inputMessage.trim()) return
 
+    const currentInput = inputMessage
+    setInputMessage('')
     setLoading(true)
+
+    // Засекаем время для минимальной длительности индикатора "Печатает..."
+    const startTime = Date.now()
+    const TYPING_MIN_DURATION = 800 // ms
+
+    // Плавное появление индикатора
+    setTypingState('entering')
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        setTypingState('visible')
+      })
+    })
 
     try {
       // Стабильный chatId для пары userId + chatType
@@ -176,7 +203,7 @@ const DashboardPage = () => {
         id: Date.now(),
         userId: user?.id || 0,
         chatType: currentChatType,
-        content: inputMessage,
+        content: currentInput,
         isFromAI: false,
         role: 'user' as const,
         timestamp: new Date().toISOString(),
@@ -189,23 +216,14 @@ const DashboardPage = () => {
           chatId
         })
       }
-      
-      setInputMessage('')
 
-      const response = await fetch('/api/v1/chat', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
-        },
-        body: JSON.stringify({
-          chatType: currentChatType,
-          content: inputMessage,
-        }),
+      const response = await chatApi.sendMessage({
+        chatType: currentChatType,
+        content: currentInput,
       })
 
-      if (response.ok) {
-        const data = await response.json()
+      if (response.data) {
+        const data = response.data
         
         const aiMessage = {
           id: Date.now() + 1,
@@ -229,6 +247,23 @@ const DashboardPage = () => {
       console.error('Error sending message:', error)
     } finally {
       setLoading(false)
+
+      // Плавное исчезновение индикатора с минимальной задержкой
+      const elapsed = Date.now() - startTime
+      const remaining = Math.max(0, TYPING_MIN_DURATION - elapsed)
+
+      const finishTyping = () => {
+        setTypingState('exiting')
+        typingMinTimeRef.current = setTimeout(() => {
+          setTypingState('idle')
+        }, 300) // совпадает с длительностью typingFadeOut
+      }
+
+      if (remaining > 0) {
+        typingMinTimeRef.current = setTimeout(finishTyping, remaining)
+      } else {
+        finishTyping()
+      }
     }
   }
 
@@ -243,9 +278,52 @@ const DashboardPage = () => {
     setInputMessage(text)
   }
 
-  const handleChatTypeChange = (chatType: string) => {
+  const handleChatTypeChange = async (chatType: string) => {
     setCurrentChatType(chatType as any)
+    // Загружаем локальную историю из IndexedDB
     loadChatHistory(chatType)
+
+    // Загружаем историю с сервера и мержим
+    try {
+      const response = await chatApi.getHistory({ chatType, limit: 100, offset: 0 })
+      const serverMessages: any[] = response.data?.messages || []
+
+      if (serverMessages.length > 0) {
+        const store = useAppStore.getState()
+        const existing = store.chatHistories[chatType] || []
+
+        // Дедупликация: пропускаем сообщения, которые уже есть (по id или content_hash)
+        const existingIds = new Set(existing.map((m: any) => m.id))
+        const existingHashes = new Set(existing.map((m: any) => m.contentHash).filter(Boolean))
+
+        const newMessages = serverMessages
+          .filter((m: any) => {
+            if (existingIds.has(m.id)) return false
+            if (m.content_hash && existingHashes.has(m.content_hash)) return false
+            return true
+          })
+          .map((m: any) => ({
+            id: m.id || Date.now() + Math.random(),
+            userId: m.user_id || user?.id || 0,
+            chatType: m.chat_type || chatType,
+            content: m.content,
+            isFromAI: m.role === 'ai' || m.is_from_ai,
+            role: m.role || (m.is_from_ai ? 'ai' : 'user'),
+            timestamp: m.created_at || m.timestamp || new Date().toISOString(),
+          }))
+
+        if (newMessages.length > 0) {
+          // Сортируем по timestamp и добавляем
+          const merged = [...existing, ...newMessages].sort(
+            (a: any, b: any) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime()
+          )
+          setChatHistory(chatType, merged)
+          console.log(`🔄 Merged ${newMessages.length} server messages for ${chatType}`)
+        }
+      }
+    } catch (err) {
+      console.error('Failed to load server chat history:', err)
+    }
   }
 
   const loadLocalChat = async (chatId: string) => {
@@ -673,13 +751,24 @@ const DashboardPage = () => {
               </div>
             ))
           )}
-          {loading && (
+          {typingState !== 'idle' && (
             <div className="flex justify-start">
-              <div className="px-6 py-3 rounded-2xl" style={{ backgroundColor: theme.surface }}>
-                <div className="flex space-x-1">
-                  <div className="w-2 h-2 bounce-theme rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
-                  <div className="w-2 h-2 bounce-theme rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
-                  <div className="w-2 h-2 bounce-theme rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
+              <div 
+                className={`flex items-center gap-3 px-5 py-3 rounded-2xl ${
+                  typingState === 'entering' ? 'typing-enter' :
+                  typingState === 'exiting' ? 'typing-exit' : ''
+                }`}
+                style={{ 
+                  backgroundColor: theme.surface,
+                  color: theme.textSecondary,
+                  boxShadow: `0 0 18px 8px ${theme.messageBubble}`,
+                }}
+              >
+                <span className="text-sm font-medium">Печатает</span>
+                <div className="flex items-center gap-1">
+                  <span className="typing-dot w-1.5 h-1.5 rounded-full" style={{ backgroundColor: theme.primary, animationDelay: '0ms' }} />
+                  <span className="typing-dot w-1.5 h-1.5 rounded-full" style={{ backgroundColor: theme.primary, animationDelay: '200ms' }} />
+                  <span className="typing-dot w-1.5 h-1.5 rounded-full" style={{ backgroundColor: theme.primary, animationDelay: '400ms' }} />
                 </div>
               </div>
             </div>

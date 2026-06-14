@@ -28,8 +28,12 @@ api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
-      localStorage.removeItem('token')
-      window.location.href = '/login'
+      const token = localStorage.getItem('token')
+      if (token) {
+        localStorage.removeItem('token')
+        // Мягкое событие вместо жёсткого редиректа — страницы сами решат как реагировать
+        window.dispatchEvent(new CustomEvent('auth:unauthorized'))
+      }
     }
     return Promise.reject(error)
   }
@@ -91,11 +95,21 @@ export const userApi = {
 }
 
 export const chatApi = {
-  sendMessage: (data: { chatType: string; content: string }) => api.post('/chat', data),
+  sendMessage: (data: { chatType: string; content: string }) => api.post('/chat', {
+    chat_type: data.chatType,
+    content: data.content,
+  }),
   
-  getHistory: (data: { chatType: string; limit?: number; offset?: number }) => api.post('/chat/history', data),
+  getHistory: (data: { chatType: string; limit?: number; offset?: number }) => api.post('/chat/history', {
+    chat_type: data.chatType,
+    limit: data.limit,
+    offset: data.offset,
+  }),
   
-  searchMessages: (data: { chatType: string; searchTerm: string }) => api.post('/chat/search', data),
+  searchMessages: (data: { chatType: string; searchTerm: string }) => api.post('/chat/search', {
+    chat_type: data.chatType,
+    search_term: data.searchTerm,
+  }),
   
   syncMessages: (data: { messages: Array<{
     chatId: string
