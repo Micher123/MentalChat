@@ -144,12 +144,12 @@ body {
 
 .chat-user-msg {
   background: linear-gradient(135deg, var(--theme-primary), var(--theme-secondary));
-  color: white;
 }
 
 .sidebar-active {
   background: linear-gradient(135deg, var(--theme-primary), var(--theme-secondary));
   color: white;
+  box-shadow: 0 -4px 14px rgba(0, 0, 0, 0.15), 0 4px 14px rgba(0, 0, 0, 0.15);
 }
 
 .border-theme {

@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import useAppStore, { themes } from '../store/useAppStore'
 import VoiceInputButton from '../components/VoiceInputButton'
+import { StrawberryIcon, BrainIcon, CardsIcon, MysticOrbIcon, ClosedBookIcon, OpenBookIcon } from '../components/DeveloperIcons'
 import { chatSyncService } from '../services/chatSyncService'
 import { useChatSync } from '../hooks/useChatSync'
 
@@ -20,6 +21,7 @@ const DashboardPage = () => {
   const [localMessages, setLocalMessages] = useState<any[]>([])
   const [showSettings, setShowSettings] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const settingsPanelRef = useRef<HTMLDivElement>(null)
 
   const currentChatHistory = chatHistories[currentChatType] || []
 
@@ -113,6 +115,23 @@ const DashboardPage = () => {
     loadLocalMessages()
   }, [user, currentChatType, showLocalHistory])
 
+  // Закрытие панели настроек при клике вне её
+  useEffect(() => {
+    if (!showSettings) return
+    const handleClickOutside = (e: MouseEvent) => {
+      if (settingsPanelRef.current && !settingsPanelRef.current.contains(e.target as Node)) {
+        setShowSettings(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [showSettings])
+
+  // Закрытие локальной истории при сворачивании сайдбара
+  useEffect(() => {
+    if (!sidebarOpen) setShowLocalHistory(false)
+  }, [sidebarOpen])
+
   // Auto-scroll to bottom
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -122,10 +141,10 @@ const DashboardPage = () => {
   React.useEffect(() => {
     if (user) {
       setChatSessions([
-        { id: 1, title: 'Психолог - День 1', lastMessage: 'Как я могу помочь?', chatType: 'psychologist' },
-        { id: 2, title: 'Таролог - День 1', lastMessage: 'Сконцентрируйтесь на вопросе', chatType: 'tarot' },
-        { id: 3, title: 'Сексолог', lastMessage: 'Расскажите подробнее', chatType: 'sexologist' },
-        { id: 4, title: 'Гадалка', lastMessage: 'Карты говорят...', chatType: 'fortune_teller' },
+        { id: 1, title: 'Психолог', lastMessage: 'Как я могу помочь?', chatType: 'psychologist', icon: 'brain' },
+        { id: 2, title: 'Таролог', lastMessage: 'Сконцентрируйтесь на вопросе', chatType: 'tarot', icon: 'cards' },
+        { id: 3, title: 'Сексолог', lastMessage: 'Расскажите подробнее', chatType: 'sexologist', icon: 'strawberry' },
+        { id: 4, title: 'Гадалка', lastMessage: 'Карты говорят...', chatType: 'fortune_teller', icon: 'crystal-ball' },
       ])
     }
   }, [user])
@@ -279,41 +298,63 @@ const DashboardPage = () => {
             >
               Чаты
             </h2>
-            {chatSessions.map((session) => (
-              <button
-                key={session.id}
-                onClick={() => handleChatTypeChange(session.chatType)}
-                className={`w-full text-left p-3 rounded-xl mb-2 transition-all ${
-                  currentChatType === session.chatType
-                    ? 'sidebar-active shadow-lg'
-                    : 'hover-bg-theme-light'
-                }`}
-              >
-                <div className="font-medium" style={{ color: theme.textPrimary }}>{session.title}</div>
-                <div className="text-sm opacity-75" style={{ color: theme.textSecondary }}>{session.lastMessage}</div>
-              </button>
-            ))}
+            {chatSessions.map((session) => {
+              const iconEl = (className: string) => {
+                switch (session.icon) {
+                  case 'brain': return <BrainIcon className={className} />
+                  case 'cards': return <CardsIcon className={className} />
+                  case 'strawberry': return <StrawberryIcon className={className} />
+                  case 'crystal-ball': return <MysticOrbIcon className={className} />
+                  default: return null
+                }
+              }
+
+              return (
+                <button
+                  key={session.id}
+                  onClick={() => handleChatTypeChange(session.chatType)}
+                  title={sidebarOpen ? undefined : session.title}
+                  className={`w-full rounded-xl mb-2 transition-all flex items-center gap-3 ${
+                    sidebarOpen ? 'text-left p-3' : 'justify-center p-2'
+                  } ${
+                    currentChatType === session.chatType
+                      ? 'sidebar-active shadow-lg'
+                      : 'hover-bg-theme-light'
+                  }`}
+                >
+                  <span className="flex-shrink-0 w-6 h-6" style={{ color: theme.primary }}>
+                    {iconEl('w-6 h-6')}
+                  </span>
+                  {sidebarOpen && (
+                    <div className="min-w-0 flex-1">
+                      <div className="font-medium truncate" style={{ color: theme.textPrimary }}>{session.title}</div>
+                      <div className="text-xs opacity-75 truncate" style={{ color: theme.textSecondary }}>{session.lastMessage}</div>
+                    </div>
+                  )}
+                </button>
+              )
+            })}
           </div>
 
           {/* Локальная история */}
           {user && localChats.length > 0 && (
             <div className="mb-4">
               <button
-                onClick={() => setShowLocalHistory(!showLocalHistory)}
-                className="w-full text-left p-2 mb-2 flex justify-between items-center"
+                onClick={() => { if (sidebarOpen) setShowLocalHistory(!showLocalHistory) }}
+                title={sidebarOpen ? undefined : 'Локальная история'}
+                className={`w-full mb-2 transition-all flex items-center gap-2 ${
+                  sidebarOpen ? 'text-left p-2' : 'justify-center p-2'
+                }`}
+                style={{ color: theme.textSecondary }}
               >
-                <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: theme.textSecondary }}>
-                  Локальная история ({localChats.length})
+                <span className="flex-shrink-0 w-6 h-6">
+                  {sidebarOpen ? <OpenBookIcon className="w-6 h-6" /> : <ClosedBookIcon className="w-6 h-6" />}
                 </span>
-                <svg 
-                  className={`w-4 h-4 transition-transform ${showLocalHistory ? 'rotate-180' : ''}`}
-                  style={{ color: theme.textMuted }}
-                  fill="none" 
-                  stroke="currentColor" 
-                  viewBox="0 0 24 24"
-                >
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
-                </svg>
+                {sidebarOpen && (
+                  <span className="text-xs font-semibold uppercase tracking-wider">
+                    Локальная история ({localChats.length})
+                  </span>
+                )}
               </button>
               
               {showLocalHistory && (
@@ -350,11 +391,14 @@ const DashboardPage = () => {
             </div>
           )}
 
-          {/* Настройки — шестерёнка + выпадающий блок */}
-          <div className="mb-4">
+        </div>
+
+        {/* Настройки — прижаты к низу сайдбара, центрированы */}
+        <div className="relative p-2 border-t" style={{ borderColor: theme.borderLight }}>
+          <div className="flex flex-col items-center">
             <button
               onClick={() => setShowSettings(!showSettings)}
-              className="w-full flex items-center gap-2 p-2 rounded-xl hover-bg-theme-light transition-colors"
+              className="flex items-center justify-center gap-2 p-2 rounded-xl hover-bg-theme-light transition-colors"
               title="Настройки"
               style={{ color: theme.textSecondary }}
             >
@@ -367,7 +411,8 @@ const DashboardPage = () => {
 
             {sidebarOpen && showSettings && (
               <div 
-                className="mt-2 p-3 backdrop-blur-lg rounded-2xl space-y-3"
+                ref={settingsPanelRef}
+                className="absolute bottom-full left-2 right-2 mb-2 p-3 backdrop-blur-lg rounded-2xl space-y-3 shadow-xl"
                 style={{ backgroundColor: theme.surface }}
               >
                 <div>
@@ -508,7 +553,9 @@ const DashboardPage = () => {
                         : ''
                     }`}
                     style={{
-                      ...(message.role !== 'user' ? { backgroundColor: theme.surface, color: theme.textPrimary } : {}),
+                      ...(message.role === 'user'
+                        ? { color: theme.textPrimary }
+                        : { backgroundColor: theme.surface, color: theme.textPrimary }),
                       boxShadow: `0 0 18px 8px ${theme.messageBubble}`,
                     }}
                   >
@@ -534,7 +581,9 @@ const DashboardPage = () => {
                       : ''
                   }`}
                   style={{
-                    ...(message.role !== 'user' ? { backgroundColor: theme.surface, color: theme.textPrimary } : {}),
+                    ...(message.role === 'user'
+                      ? { color: theme.textPrimary }
+                      : { backgroundColor: theme.surface, color: theme.textPrimary }),
                     boxShadow: `0 0 18px 8px ${theme.messageBubble}`,
                   }}
                 >
