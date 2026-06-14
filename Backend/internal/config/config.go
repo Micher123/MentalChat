@@ -35,6 +35,7 @@ type DatabaseConfig struct {
 
 type AIConfig struct {
 	ChadAPIURL      string                `mapstructure:"chad_api_url"`
+	ChadAPIKey      string                `mapstructure:"chad_api_key"`
 	Models          AIModelConfig         `mapstructure:"models"`
 	YandexSpeechKit YandexSpeechKitConfig `mapstructure:"yandex_speechkit"`
 }
@@ -137,6 +138,7 @@ func LoadConfig() *Config {
 		viper.SetDefault("database.ssl_mode", "disable")
 
 		viper.SetDefault("ai.chad_api_url", "https://ask.chadgpt.ru/api/public")
+		viper.SetDefault("ai.chad_api_key", "")
 		viper.SetDefault("ai.models.free", "gpt-4o-mini")
 		viper.SetDefault("ai.models.pro", "gpt-4o")
 		viper.SetDefault("ai.models.ultra", "gpt-4-turbo")

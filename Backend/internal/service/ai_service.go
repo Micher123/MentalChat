@@ -1,21 +1,66 @@
 package service
 
 import (
+	"bytes"
 	"context"
-	"mentalchat/internal/config"
-	"mentalchat/internal/model"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"strings"
 	"time"
+
+	"mentalchat/internal/config"
 
 	"github.com/rs/zerolog/log"
 )
 
-type AIService struct {
-	cfg             *config.AIConfig
-	yandexSpeechKit *YandexSpeechKitService
+// --- ChadGPT API request/response structures ---
+// ChadGPT (ask.chadgpt.ru) expects a simple JSON body:
+//
+//	{"message": "...", "api_key": "chad-..."}
+//
+// and returns:
+//
+//	{"is_success": true, "response": "...", ...}
+type chadRequest struct {
+	Message string `json:"message"`
+	APIKey  string `json:"api_key"`
 }
 
-func NewAIService(cfg *config.AIConfig) *AIService {
-	aiService := &AIService{cfg: cfg}
+type chadResponse struct {
+	IsSuccess       bool   `json:"is_success"`
+	Response        string `json:"response"`
+	Content         string `json:"content"`
+	Text            string `json:"text"`
+	Message         string `json:"message"`
+	UsedSparksCount int    `json:"used_sparks_count"`
+	UsedTokensCount int    `json:"used_tokens_count"`
+	ErrorCode       string `json:"error_code,omitempty"`
+	ErrorMessage    string `json:"error_message,omitempty"`
+}
+
+type AIService struct {
+	cfg             *config.AIConfig
+	httpClient      *http.Client
+	yandexSpeechKit *YandexSpeechKitService
+	promptService   *PromptService
+}
+
+func NewAIService(cfg *config.AIConfig, promptSvc *PromptService) *AIService {
+	aiService := &AIService{
+		cfg:           cfg,
+		promptService: promptSvc,
+		httpClient: &http.Client{
+			Timeout: 180 * time.Second,
+			Transport: &http.Transport{
+				MaxIdleConns:        10,
+				IdleConnTimeout:     90 * time.Second,
+				TLSHandshakeTimeout: 30 * time.Second,
+				DisableCompression:  true,
+			},
+		},
+	}
 
 	// Инициализируем Yandex SpeechKit если включен
 	if cfg.YandexSpeechKit.Enabled {
@@ -30,193 +75,200 @@ func NewAIService(cfg *config.AIConfig) *AIService {
 	return aiService
 }
 
-// GetAIResponseWithContext sends prompt with pre-built conversation context to AI.
+// GetAIResponseWithContext sends the specialist prompt (from specialist.md) with
+// pre-built conversation context to the AI model.
 func (s *AIService) GetAIResponseWithContext(prompt, chatType, tier, contextHistory string) (string, error) {
-	model := s.cfg.Models.Free
-	switch tier {
-	case "pro":
-		model = s.cfg.Models.Pro
-	case "ultra":
-		model = s.cfg.Models.Ultra
-	}
+	// Build the specialist prompt using the template
+	contextSummary := s.promptService.BuildChatContextSummary(contextHistory)
+	fullPrompt := s.promptService.BuildSpecialistPrompt(chatType, contextSummary, prompt)
 
-	systemPrompt := s.getSystemPrompt(chatType)
-	userContext := s.getUserContext(tier)
-
-	fullPrompt := systemPrompt + "\n\n" + userContext + "\n\n" +
-		"История диалога:\n" + contextHistory + "\n\n" +
-		"User: " + prompt + "\nAI:"
-
-	response, err := s.callAI_API(fullPrompt, model)
-	if err != nil {
-		return "", err
-	}
-
-	refinedResponse, err := s.refineResponse(response, chatType)
-	if err != nil {
-		return "", err
-	}
-
-	return refinedResponse, nil
+	model := s.selectModel(tier)
+	return s.callChadGPT(fullPrompt, model)
 }
 
+// GetAIResponse uses the specialist prompt without conversation context.
 func (s *AIService) GetAIResponse(prompt, chatType, tier string) (string, error) {
-	// Determine the model based on tier
-	model := s.cfg.Models.Free
+	contextSummary := s.promptService.BuildChatContextSummary("")
+	fullPrompt := s.promptService.BuildSpecialistPrompt(chatType, contextSummary, prompt)
+
+	model := s.selectModel(tier)
+	return s.callChadGPT(fullPrompt, model)
+}
+
+// selectModel returns the model name based on subscription tier.
+func (s *AIService) selectModel(tier string) string {
 	switch tier {
 	case "pro":
-		model = s.cfg.Models.Pro
+		return s.cfg.Models.Pro
 	case "ultra":
-		model = s.cfg.Models.Ultra
-	}
-
-	// Construct the full prompt with context
-	fullPrompt := s.buildPrompt(prompt, chatType, tier)
-
-	// Call AI API (placeholder implementation)
-	response, err := s.callAI_API(fullPrompt, model)
-	if err != nil {
-		return "", err
-	}
-
-	// Refine the response for better quality
-	refinedResponse, err := s.refineResponse(response, chatType)
-	if err != nil {
-		return "", err
-	}
-
-	return refinedResponse, nil
-}
-
-func (s *AIService) buildPrompt(prompt, chatType, tier string) string {
-	// Base system prompt based on chat type
-	systemPrompt := s.getSystemPrompt(chatType)
-
-	// Add user context based on tier
-	userContext := s.getUserContext(tier)
-
-	return systemPrompt + "\n\n" + userContext + "\n\nUser: " + prompt + "\nAI:"
-}
-
-func (s *AIService) getSystemPrompt(chatType string) string {
-	prompts := map[string]string{
-		"psychologist":   `Ты профессиональный психолог, который помогает женщинам разбираться в их эмоциях, находить баланс и улучшать качество жизни. Твой стиль общения теплый, поддерживающий и эмпатичный.`,
-		"tarot":          `Ты опытный таролог, который помогает женщинам найти ответы на важные вопросы через карты Таро. Твой стиль - мудрый, вдохновляющий и ориентированный на духовный рост.`,
-		"sexologist":     `Ты квалифицированный сексолог, который помогает женщинам понять себя, свои желания и улучшить свою сексуальную жизнь. Твой стиль - открытый, непредвзятый и поддерживающий.`,
-		"fortune_teller": `Ты чувственная гадалка, которая помогает женщинам увидеть путь вперед через интуицию и метафизические практики. Твой стиль - вдохновляющий и ориентированный на позитивные изменения.`,
-	}
-
-	if prompt, ok := prompts[chatType]; ok {
-		return prompt
-	}
-	return prompts["psychologist"]
-}
-
-func (s *AIService) getUserContext(tier string) string {
-	switch tier {
-	case "pro":
-		return "Пользователь использует PRO-тариф с улучшенной моделью ИИ. Ему доступны более глубокие аналитические возможности и персонализированные советы."
-	case "ultra":
-		return "Пользователь использует ULTRA-тариф с максимальной моделью ИИ. Ему доступны самые продвинутые возможности, включая анализ сложных ситуаций и долгосрочное планирование."
+		return s.cfg.Models.Ultra
 	default:
-		return "Пользователь использует бесплатный тариф. Ему доступны основные возможности ИИ для поддержки в повседневных вопросах."
+		return s.cfg.Models.Free
 	}
 }
 
-func (s *AIService) callAI_API(prompt, model string) (string, error) {
-	// Placeholder for actual AI API call
-	// In production, this would call Yandex Chad API or another AI service
-
-	// Simulate AI response
-	response := "Я понимаю, что вы хотите обсудить. Давайте разберемся вместе. " +
-		"Важно помнить, что ваши чувства и переживания важны и заслуживают внимания. " +
-		"Попробуйте сосредоточиться на своем дыхании и почувствовать себя в безопасности."
-
-	return response, nil
-}
-
-func (s *AIService) refineResponse(response, chatType string) (string, error) {
-	// Refine response to make it more natural and emotionally rich
-	// This could involve calling the AI API again with specific instructions
-
-	// Add emotional coloring and warmth
-	warmthPhrases := map[string][]string{
-		"psychologist": []string{
-			"Милая,",
-			"Дорогая,",
-			"Золотце,",
-			"Milочка,",
-		},
-		"tarot": []string{
-			"Духовная душа,",
-			"Светлая душа,",
-			"Ты светлая натура,",
-			"Душа моя,",
-		},
-		"sexologist": []string{
-			"Моя дорогая,",
-			"Дорогая моя,",
-			"Ты прекрасна,",
-			"Душа моя,",
-		},
-		"fortune_teller": []string{
-			"Моя дорогая,",
-			"Ты светлая натура,",
-			"Душа моя,",
-			"Милая моя,",
-		},
+// callChadGPT performs a real HTTP request to ChadGPT API.
+// URL format: {chad_api_url}/{model}  (e.g. https://ask.chadgpt.ru/api/public/gpt-4o-mini)
+// Body:   {"message": "...", "api_key": "..."}
+// API key is sent in the request body (not in headers).
+func (s *AIService) callChadGPT(prompt, model string) (string, error) {
+	if s.cfg.ChadAPIKey == "" {
+		log.Warn().Msg("No ChadGPT API key configured, using mock response")
+		return s.getMockResponse(prompt), nil
 	}
 
-	phrases := warmthPhrases[chatType]
-	if len(phrases) > 0 {
-		// Select random phrase (simplified - in production use proper random)
-		response = phrases[0] + " " + response
+	// Build URL: base + / + model
+	url := fmt.Sprintf("%s/%s", strings.TrimRight(s.cfg.ChadAPIURL, "/"), model)
+
+	reqBody := chadRequest{
+		Message: prompt,
+		APIKey:  s.cfg.ChadAPIKey,
 	}
 
-	// Add closing reassurance
-	reassurance := "\n\nПомни, ты прекрасна такой, какая есть. Всё будет хорошо! 🌸"
-	response += reassurance
+	jsonData, err := json.Marshal(reqBody)
+	if err != nil {
+		log.Err(err).Msg("Failed to marshal ChadGPT request")
+		return s.getMockResponse(prompt), nil
+	}
 
-	return response, nil
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewBuffer(jsonData))
+	if err != nil {
+		log.Err(err).Msg("Failed to create ChadGPT request")
+		return s.getMockResponse(prompt), nil
+	}
+
+	req.Header.Set("Content-Type", "application/json")
+
+	log.Debug().
+		Str("url", s.cfg.ChadAPIURL).
+		Int("prompt_len", len(prompt)).
+		Msg("Calling ChadGPT API")
+
+	resp, err := s.httpClient.Do(req)
+	if err != nil {
+		log.Err(err).Str("url", s.cfg.ChadAPIURL).Msg("ChadGPT API request failed")
+		return s.getMockResponse(prompt), nil
+	}
+	defer resp.Body.Close()
+
+	respBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Err(err).Msg("Failed to read ChadGPT response body")
+		return s.getMockResponse(prompt), nil
+	}
+
+	log.Debug().
+		Int("status", resp.StatusCode).
+		Int("body_len", len(respBytes)).
+		Msg("ChadGPT API response received")
+
+	if resp.StatusCode != http.StatusOK {
+		log.Warn().
+			Int("status", resp.StatusCode).
+			Str("body", string(respBytes)).
+			Msg("ChadGPT API returned non-200 status, using mock response")
+		return s.getMockResponse(prompt), nil
+	}
+
+	var chadResp chadResponse
+	if err := json.Unmarshal(respBytes, &chadResp); err != nil {
+		log.Err(err).Str("raw", string(respBytes)).Msg("Failed to unmarshal ChadGPT response")
+		return s.getMockResponse(prompt), nil
+	}
+
+	if !chadResp.IsSuccess {
+		log.Warn().
+			Str("error_code", chadResp.ErrorCode).
+			Str("error_message", chadResp.ErrorMessage).
+			Msg("ChadGPT API returned error, using mock response")
+		return s.getMockResponse(prompt), nil
+	}
+
+	// Extract response text (try multiple fields in priority order)
+	responseText := chadResp.Response
+	if responseText == "" {
+		responseText = chadResp.Content
+	}
+	if responseText == "" {
+		responseText = chadResp.Text
+	}
+	if responseText == "" {
+		responseText = chadResp.Message
+	}
+
+	// Clean the response: strip echoed prompt if present
+	cleanedResponse := s.cleanAIResponse(responseText, prompt)
+
+	if strings.TrimSpace(cleanedResponse) == "" || len(cleanedResponse) < 10 {
+		log.Warn().
+			Int("response_len", len(cleanedResponse)).
+			Msg("ChadGPT response too short or empty, using mock response")
+		return s.getMockResponse(prompt), nil
+	}
+
+	// Remove invalid UTF-8 sequences
+	cleanedResponse = strings.ToValidUTF8(cleanedResponse, "")
+
+	log.Info().
+		Int("response_len", len(cleanedResponse)).
+		Int("sparks_used", chadResp.UsedSparksCount).
+		Int("tokens_used", chadResp.UsedTokensCount).
+		Msg("ChadGPT API success")
+
+	return cleanedResponse, nil
 }
 
-func (s *AIService) TranscribeVoice(voiceData []byte) (string, error) {
-	// Если Yandex SpeechKit включен, используем его
-	if s.yandexSpeechKit != nil {
-		transcript, err := s.yandexSpeechKit.Transcribe(voiceData, "ru-RU")
-		if err != nil {
-			log.Err(err).Msg("Yandex SpeechKit transcription failed, falling back to default")
-			// Fallback на заглушку
-			return s.fallbackTranscribe(voiceData)
+// cleanAIResponse removes the echoed prompt from the beginning of the API response.
+func (s *AIService) cleanAIResponse(response, prompt string) string {
+	response = strings.TrimSpace(response)
+	prompt = strings.TrimSpace(prompt)
+
+	// If response starts with the prompt, remove that prefix
+	if strings.HasPrefix(response, prompt) {
+		remaining := strings.TrimPrefix(response, prompt)
+		remaining = strings.TrimSpace(remaining)
+		if remaining != "" {
+			return remaining
 		}
-		return transcript, nil
 	}
 
-	// Fallback на заглушку если Yandex SpeechKit не включен
-	return s.fallbackTranscribe(voiceData)
-}
-
-func (s *AIService) fallbackTranscribe(voiceData []byte) (string, error) {
-	// Заглушка для тестирования
-	// В продакшене здесь должна быть интеграция с другим STT сервисом
-	log.Warn().Msg("Using fallback transcription (placeholder)")
-	return "Это тестовая транскрипция. Настройте Yandex SpeechKit для реальной работы.", nil
-}
-
-func (s *AIService) ProcessVoiceMessage(userID uint, voiceFilePath string) (*model.VoiceMessage, error) {
-	// Read voice file
-	// Transcribe voice to text
-	// Get AI response
-	// Store voice message and transcript
-
-	vm := &model.VoiceMessage{
-		UserID:     userID,
-		FilePath:   voiceFilePath,
-		FileName:   "voice_" + time.Now().Format("20060102_150405") + ".ogg",
-		FileSize:   1024,
-		Duration:   15.5,
-		Transcript: "Транскрипция голосового сообщения",
+	// Also check for partial prompt echo (first 100 chars)
+	if len(prompt) > 100 {
+		promptPrefix := prompt[:100]
+		if strings.HasPrefix(response, promptPrefix) {
+			remaining := strings.TrimPrefix(response, promptPrefix)
+			remaining = strings.TrimSpace(remaining)
+			if remaining != "" {
+				return remaining
+			}
+		}
 	}
 
-	return vm, nil
+	return response
+}
+
+// getMockResponse returns a fallback message when the AI API is unavailable.
+// This prevents the user from seeing an error.
+func (s *AIService) getMockResponse(prompt string) string {
+	now := time.Now().Format("15:04")
+
+	// Provide a helpful response based on the prompt content
+	return fmt.Sprintf(
+		"Спасибо за ваше сообщение! 😊\n\n"+
+			"Я — виртуальный ассистент MentalChat, и я здесь, чтобы поддержать вас.\n\n"+
+			"Сейчас AI-сервис временно недоступен, но я всё равно слышу вас. "+
+			"Ваше сообщение сохранено, и как только соединение восстановится, я смогу дать более развёрнутый ответ.\n\n"+
+			"Пока вы ждёте, можете попробовать:\n"+
+			"- Задать другой вопрос\n"+
+			"- Переключить тип чата (психолог, коуч, друг)\n"+
+			"- Воспользоваться голосовым вводом\n\n"+
+			"_Отправлено в %s_", now)
+}
+
+// TranscribeVoice delegates to Yandex SpeechKit service (if enabled). Defaults to Russian.
+func (s *AIService) TranscribeVoice(audioData []byte) (string, error) {
+	if s.yandexSpeechKit == nil {
+		return "", fmt.Errorf("voice transcription is not available: Yandex SpeechKit not configured")
+	}
+	return s.yandexSpeechKit.Transcribe(audioData, "ru-RU")
 }

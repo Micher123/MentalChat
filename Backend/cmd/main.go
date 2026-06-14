@@ -38,7 +38,8 @@ func main() {
 	storage := storage.NewStorage(db)
 
 	// Initialize services
-	aiService := service.NewAIService(&cfg.AI)
+	promptService := service.NewPromptService()
+	aiService := service.NewAIService(&cfg.AI, promptService)
 	emailService := service.NewEmailService(&cfg.Email)
 	fingerprintService := service.NewFingerprintService(&cfg.Security)
 	jwtService := service.NewJWTService()
@@ -49,10 +50,11 @@ func main() {
 	// Initialize new chat services
 	chatIndexService := service.NewChatIndexService(storage)
 	contextBuilder := service.NewContextBuilder(storage, service.DefaultContextConfig())
+	messageQueueService := service.NewMessageQueueService(storage, chatIndexService, contextBuilder, aiService)
 
 	// Initialize handlers
 	authHandler := handler.NewAuthHandler(authService, userService, paymentService, storage, emailService)
-	chatHandler := handler.NewChatHandler(aiService, chatIndexService, contextBuilder, storage)
+	chatHandler := handler.NewChatHandler(aiService, chatIndexService, contextBuilder, storage, messageQueueService)
 	userHandler := handler.NewUserHandler(userService, storage)
 	voiceHandler := handler.NewVoiceHandler(aiService, storage)
 	configHandler := handler.NewConfigHandler(storage)

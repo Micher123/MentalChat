@@ -176,3 +176,50 @@ body {
 .spinner-theme {
   border-top-color: var(--theme-primary);
 }
+
+/* Typing indicator — волнообразные точки */
+@keyframes typingWave {
+  0%, 60%, 100% {
+    transform: translateY(0);
+    opacity: 0.3;
+  }
+  30% {
+    transform: translateY(-6px);
+    opacity: 1;
+  }
+}
+
+.typing-dot {
+  animation: typingWave 1.2s ease-in-out infinite;
+}
+
+/* Плавное появление/исчезновение индикатора "Печатает..." */
+@keyframes typingFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes typingFadeOut {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-8px);
+  }
+}
+
+.typing-enter {
+  animation: typingFadeIn 0.3s ease-out forwards;
+}
+
+.typing-exit {
+  animation: typingFadeOut 0.3s ease-in forwards;
+}
