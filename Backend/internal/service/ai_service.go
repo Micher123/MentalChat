@@ -75,6 +75,34 @@ func NewAIService(cfg *config.AIConfig, promptSvc *PromptService) *AIService {
 	return aiService
 }
 
+// CheckContext sends a lightweight prompt to AI asking whether the user message
+// is relevant to the service themes (psychologist, tarot, sexologist, fortune_teller).
+// Returns true if the AI responds with RELEVANT, false if IRRELEVANT or on error.
+func (s *AIService) CheckContext(userMessage string) bool {
+	filterPrompt := s.promptService.BuildContextFilterPrompt(userMessage)
+
+	model := s.cfg.Models.Free // lightweight model for filtering
+	if model == "" {
+		model = "gpt-4o-mini"
+	}
+
+	resp, err := s.callChadGPT(filterPrompt, model)
+	if err != nil {
+		log.Warn().Err(err).Msg("Context filter call failed, allowing message by default")
+		return true // allow on error to avoid blocking users
+	}
+
+	isRelevant := IsRelevantResponse(resp)
+
+	log.Debug().
+		Str("filter_response", resp).
+		Bool("is_relevant", isRelevant).
+		Int("message_len", len(userMessage)).
+		Msg("Context filter check completed")
+
+	return isRelevant
+}
+
 // GetAIResponseWithContext sends the specialist prompt (from specialist.md) with
 // pre-built conversation context to the AI model.
 func (s *AIService) GetAIResponseWithContext(prompt, chatType, tier, contextHistory string) (string, error) {

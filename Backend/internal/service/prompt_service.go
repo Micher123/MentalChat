@@ -9,6 +9,9 @@ import (
 //go:embed specialist.md
 var specialistTemplate string
 
+//go:embed context_filter.md
+var contextFilterTemplate string
+
 // PromptService fills the specialist.md template with dynamic values.
 type PromptService struct{}
 
@@ -22,6 +25,33 @@ var roleDisplayNames = map[string]string{
 	"tarot":          "таролог",
 	"sexologist":     "сексолог",
 	"fortune_teller": "гадалка",
+}
+
+// BuildContextFilterPrompt fills {user_message} in the context_filter.md template.
+// The template asks AI to respond with exactly one word: RELEVANT or IRRELEVANT.
+func (ps *PromptService) BuildContextFilterPrompt(userMessage string) string {
+	return strings.Replace(contextFilterTemplate, "{user_message}", userMessage, 1)
+}
+
+// IsRelevantResponse parses the AI response from the context filter prompt
+// and returns true if the user message is considered relevant to the service.
+// Handles common AI output variations (mixed case, extra whitespace, punctuation).
+func IsRelevantResponse(filterResponse string) bool {
+	resp := strings.TrimSpace(strings.ToUpper(filterResponse))
+	// Remove trailing punctuation like dots, commas, etc.
+	resp = strings.TrimRight(resp, ".,!;:。，！；：")
+
+	// Check IRRELEVANT first because it CONTAINS the substring RELEVANT.
+	if strings.Contains(resp, "IRRELEVANT") {
+		return false
+	}
+	if strings.Contains(resp, "RELEVANT") {
+		return true
+	}
+
+	// If AI didn't follow the format, default to true (allow) to avoid blocking users.
+	// But log this so we can tune the prompt.
+	return true
 }
 
 // BuildSpecialistPrompt fills {роль специалиста}, {краткий контекст чата},

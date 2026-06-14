@@ -24,6 +24,10 @@ const DashboardPage = () => {
   const [localMessages, setLocalMessages] = useState<any[]>([])
   const [showSettings, setShowSettings] = useState(false)
   const [showProfile, setShowProfile] = useState(false)
+  const [deleteMode, setDeleteMode] = useState(false)
+  const [selectedMessages, setSelectedMessages] = useState<Set<number>>(new Set())
+  const [showClearConfirm, setShowClearConfirm] = useState(false)
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const settingsPanelRef = useRef<HTMLDivElement>(null)
   const profilePanelRef = useRef<HTMLDivElement>(null)
@@ -222,7 +226,8 @@ const DashboardPage = () => {
         content: currentInput,
       })
 
-      if (response.data) {
+      // If queued, AI is processing another request and the reply will arrive via sync/next message
+      if (response.data && !response.data.queued) {
         const data = response.data
         
         const aiMessage = {
@@ -280,8 +285,8 @@ const DashboardPage = () => {
 
   const handleChatTypeChange = async (chatType: string) => {
     setCurrentChatType(chatType as any)
-    // Загружаем локальную историю из IndexedDB
-    loadChatHistory(chatType)
+    // Загружаем локальную историю из IndexedDB и дожидаемся
+    await loadChatHistory(chatType)
 
     // Загружаем историю с сервера и мержим
     try {
@@ -292,14 +297,20 @@ const DashboardPage = () => {
         const store = useAppStore.getState()
         const existing = store.chatHistories[chatType] || []
 
-        // Дедупликация: пропускаем сообщения, которые уже есть (по id или content_hash)
+        // Дедупликация: пропускаем сообщения, которые уже есть (по id, content_hash или содержимому)
         const existingIds = new Set(existing.map((m: any) => m.id))
         const existingHashes = new Set(existing.map((m: any) => m.contentHash).filter(Boolean))
+        // Простая сигнатура для дедупликации по содержимому: content|role|timestamp (округляем до минуты)
+        const existingSignatures = new Set(
+          existing.map((m: any) => `${m.content}|${m.role}|${m.timestamp?.slice(0, 16)}`)
+        )
 
         const newMessages = serverMessages
           .filter((m: any) => {
             if (existingIds.has(m.id)) return false
             if (m.content_hash && existingHashes.has(m.content_hash)) return false
+            const sig = `${m.content}|${m.role}|${(m.created_at || m.timestamp || '').slice(0, 16)}`
+            if (existingSignatures.has(sig)) return false
             return true
           })
           .map((m: any) => ({
@@ -352,6 +363,57 @@ const DashboardPage = () => {
 
   // Список названий тем для отображения в сетке
   const themeNames = Object.keys(themes)
+
+  // --- Удаление сообщений ---
+  const toggleMessageSelection = (messageId: number) => {
+    setSelectedMessages(prev => {
+      const next = new Set(prev)
+      if (next.has(messageId)) {
+        next.delete(messageId)
+      } else {
+        next.add(messageId)
+      }
+      return next
+    })
+  }
+
+  const handleDeleteSelected = async () => {
+    if (selectedMessages.size === 0) return
+    try {
+      const messageIds = Array.from(selectedMessages)
+      await chatApi.deleteMessages({ message_ids: messageIds })
+      // Удаляем из локального стора
+      const store = useAppStore.getState()
+      const updatedHistory = currentChatHistory.filter(m => !selectedMessages.has(m.id))
+      store.setChatHistory(currentChatType, updatedHistory)
+      // Удаляем из IndexedDB
+      await chatSyncService.deleteLocalMessages(messageIds)
+      setSelectedMessages(new Set())
+      setDeleteMode(false)
+      setShowDeleteConfirm(false)
+    } catch (err) {
+      console.error('Failed to delete messages:', err)
+      alert('Не удалось удалить сообщения. Попробуйте позже.')
+    }
+  }
+
+  const handleClearHistory = async () => {
+    try {
+      await chatApi.clearHistory({ chat_type: currentChatType })
+      const store = useAppStore.getState()
+      store.setChatHistory(currentChatType, [])
+      // Удаляем из IndexedDB
+      if (user) {
+        const chatId = `${user.id}_${currentChatType}`
+        await chatSyncService.clearLocalChatMessages(chatId)
+      }
+      setDeleteMode(false)
+      setShowClearConfirm(false)
+    } catch (err) {
+      console.error('Failed to clear history:', err)
+      alert('Не удалось очистить историю. Попробуйте позже.')
+    }
+  }
 
   return (
     <div 
@@ -642,19 +704,44 @@ const DashboardPage = () => {
             {currentChatType === 'sexologist' && 'Сексолог'}
             {currentChatType === 'fortune_teller' && 'Гадалка'}
           </h2>
-          <p className="text-sm" style={{ color: theme.textSecondary }}>Специалист в режиме онлайн</p>
+          <p className="text-sm" style={{ color: theme.textSecondary }}>
+            {deleteMode ? `Выбрано: ${selectedMessages.size}` : 'Специалист в режиме онлайн'}
+          </p>
         </div>
 
-        <button
-          onClick={() => setShowSearch(!showSearch)}
-          className="p-2 rounded-full hover-bg-theme-light transition-colors"
-          title="Поиск по сообщениям"
-          style={{ color: theme.primary }}
-        >
-          <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
-          </svg>
-        </button>
+        <div className="flex items-center gap-2">
+          {/* Кнопка режима удаления */}
+          <button
+            onClick={() => {
+              setDeleteMode(!deleteMode)
+              setSelectedMessages(new Set())
+              setShowDeleteConfirm(false)
+              setShowClearConfirm(false)
+            }}
+            className={`p-2 rounded-full transition-colors ${
+              deleteMode ? '' : 'hover-bg-theme-light'
+            }`}
+            title={deleteMode ? 'Отменить' : 'Удалить сообщения'}
+            style={{
+              color: deleteMode ? theme.dangerText : theme.textSecondary,
+              backgroundColor: deleteMode ? theme.dangerHover : 'transparent',
+            }}
+          >
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+            </svg>
+          </button>
+          <button
+            onClick={() => setShowSearch(!showSearch)}
+            className="p-2 rounded-full hover-bg-theme-light transition-colors"
+            title="Поиск по сообщениям"
+            style={{ color: theme.primary }}
+          >
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+          </button>
+        </div>
       </div>
 
       {/* Search bar */}
@@ -731,22 +818,56 @@ const DashboardPage = () => {
             currentChatHistory.map((message) => (
               <div
                 key={message.id}
-                className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                className={`flex ${message.role === 'user' ? 'justify-end' : 'justify-start'} ${deleteMode ? 'cursor-pointer' : ''}`}
+                onClick={() => {
+                  if (deleteMode) toggleMessageSelection(message.id)
+                }}
               >
-                <div
-                  className={`max-w-md px-6 py-3 rounded-3xl ${
-                    message.role === 'user'
-                      ? 'chat-user-msg'
-                      : ''
-                  }`}
-                  style={{
-                    ...(message.role === 'user'
-                      ? { color: theme.textPrimary }
-                      : { backgroundColor: theme.surface, color: theme.textPrimary }),
-                    boxShadow: `0 0 18px 8px ${theme.messageBubble}`,
-                  }}
-                >
-                  {message.content}
+                <div className={`flex items-center gap-2 ${message.role === 'user' ? 'flex-row-reverse' : 'flex-row'}`}>
+                  {deleteMode && (
+                    <div
+                      className={`w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-all ${
+                        selectedMessages.has(message.id)
+                          ? ''
+                          : 'opacity-40'
+                      }`}
+                      style={{
+                        borderColor: selectedMessages.has(message.id) ? theme.dangerText : theme.textMuted,
+                        backgroundColor: selectedMessages.has(message.id) ? theme.dangerText : 'transparent',
+                      }}
+                    >
+                      {selectedMessages.has(message.id) && (
+                        <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                        </svg>
+                      )}
+                    </div>
+                  )}
+                  <div
+                    className={`max-w-md px-6 py-3 rounded-3xl transition-all ${
+                      message.role === 'user'
+                        ? 'chat-user-msg'
+                        : ''
+                    } ${
+                      deleteMode && selectedMessages.has(message.id)
+                        ? 'ring-2'
+                        : ''
+                    }`}
+                    style={{
+                      ...(message.role === 'user'
+                        ? { color: theme.textPrimary }
+                        : { backgroundColor: theme.surface, color: theme.textPrimary }),
+                      boxShadow: `0 0 18px 8px ${theme.messageBubble}`,
+                      ...(deleteMode && selectedMessages.has(message.id) ? {
+                        boxShadow: `0 0 0 2px ${theme.dangerText}`,
+                      } : {}),
+                    }}
+                  >
+                    <div className="text-xs opacity-60 mb-1">
+                      {new Date(message.timestamp).toLocaleTimeString()}
+                    </div>
+                    {message.content}
+                  </div>
                 </div>
               </div>
             ))
@@ -775,6 +896,132 @@ const DashboardPage = () => {
           )}
           <div ref={messagesEndRef} />
         </div>
+
+        {/* Панель действий удаления */}
+        {deleteMode && (
+          <div
+            className="px-4 py-3 flex items-center justify-between backdrop-blur-lg"
+            style={{
+              backgroundColor: theme.headerBg,
+              borderTop: `1px solid ${theme.borderLight}`,
+            }}
+          >
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => {
+                  setDeleteMode(false)
+                  setSelectedMessages(new Set())
+                  setShowDeleteConfirm(false)
+                  setShowClearConfirm(false)
+                }}
+                className="px-4 py-2 rounded-full text-sm font-medium transition-colors hover-bg-theme-light"
+                style={{ color: theme.textSecondary }}
+              >
+                Отмена
+              </button>
+              {selectedMessages.size > 0 && (
+                <button
+                  onClick={() => setShowDeleteConfirm(true)}
+                  className="px-4 py-2 rounded-full text-sm font-medium transition-colors"
+                  style={{
+                    backgroundColor: theme.dangerText,
+                    color: '#ffffff',
+                  }}
+                >
+                  Удалить выбранные ({selectedMessages.size})
+                </button>
+              )}
+            </div>
+            <button
+              onClick={() => {
+                if (currentChatHistory.length === 0) {
+                  alert('Нет сообщений для удаления')
+                  return
+                }
+                setShowClearConfirm(true)
+              }}
+              className="px-4 py-2 rounded-full text-sm font-medium transition-colors"
+              style={{
+                backgroundColor: theme.dangerHover,
+                color: theme.dangerText,
+              }}
+            >
+              Очистить всю историю
+            </button>
+          </div>
+        )}
+
+        {/* Модальное окно подтверждения очистки истории */}
+        {showClearConfirm && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+            <div
+              className="mx-4 p-6 rounded-2xl shadow-2xl max-w-sm w-full"
+              style={{ backgroundColor: theme.surface }}
+            >
+              <h3 className="text-lg font-bold mb-2" style={{ color: theme.textPrimary }}>
+                Очистить историю?
+              </h3>
+              <p className="text-sm mb-6" style={{ color: theme.textSecondary }}>
+                Все сообщения в чате «{currentChatType === 'psychologist' ? 'Психолог' : currentChatType === 'tarot' ? 'Таролог' : currentChatType === 'sexologist' ? 'Сексолог' : 'Гадалка'}» будут безвозвратно удалены.
+              </p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowClearConfirm(false)}
+                  className="flex-1 px-4 py-2.5 rounded-full text-sm font-medium transition-colors hover-bg-theme-light"
+                  style={{ color: theme.textSecondary }}
+                >
+                  Отмена
+                </button>
+                <button
+                  onClick={handleClearHistory}
+                  className="flex-1 px-4 py-2.5 rounded-full text-sm font-medium transition-colors"
+                  style={{
+                    backgroundColor: theme.dangerText,
+                    color: '#ffffff',
+                  }}
+                >
+                  Очистить
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Модальное окно подтверждения удаления выбранных */}
+        {showDeleteConfirm && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+            <div
+              className="mx-4 p-6 rounded-2xl shadow-2xl max-w-sm w-full"
+              style={{ backgroundColor: theme.surface }}
+            >
+              <h3 className="text-lg font-bold mb-2" style={{ color: theme.textPrimary }}>
+                Удалить сообщения?
+              </h3>
+              <p className="text-sm mb-6" style={{ color: theme.textSecondary }}>
+                Выбрано сообщений: {selectedMessages.size}. Это действие нельзя отменить.
+              </p>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setShowDeleteConfirm(false)}
+                  className="flex-1 px-4 py-2.5 rounded-full text-sm font-medium transition-colors hover-bg-theme-light"
+                  style={{ color: theme.textSecondary }}
+                >
+                  Отмена
+                </button>
+                <button
+                  onClick={handleDeleteSelected}
+                  className="flex-1 px-4 py-2.5 rounded-full text-sm font-medium transition-colors"
+                  style={{
+                    backgroundColor: theme.dangerText,
+                    color: '#ffffff',
+                  }}
+                >
+                  Удалить
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Input area */}
         <div 

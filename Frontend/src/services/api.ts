@@ -119,6 +119,10 @@ export const chatApi = {
     timestamp: string
     localId: number
   }> }) => api.post('/chat/sync', data),
+
+  deleteMessages: (data: { message_ids: number[] }) => api.post('/chat/messages/delete', data),
+
+  clearHistory: (data: { chat_type: string }) => api.post('/chat/history/clear', data),
 }
 
 export const paymentApi = {

@@ -72,6 +72,16 @@ func (h *ChatHandler) Chat(c *gin.Context) {
 		return
 	}
 
+	// If message was queued (AI was already processing), tell the client
+	// not to expect a direct AI reply — it will arrive via pull sync.
+	if aiMsg == nil {
+		c.JSON(http.StatusOK, gin.H{
+			"chat_type": req.ChatType,
+			"queued":    true,
+		})
+		return
+	}
+
 	// Build response with sequence numbers for client sync
 	resp := gin.H{
 		"message":    aiMsg.Content,
@@ -294,6 +304,56 @@ func (h *ChatHandler) SyncMessages(c *gin.Context) {
 		"failed":     failed,
 		"conflicts":  conflicts,
 		"synced_ids": syncedIDs,
+	})
+}
+
+// ---- Delete Messages ----
+
+type DeleteMessagesRequest struct {
+	MessageIDs []uint `json:"message_ids" binding:"required,min=1"`
+}
+
+func (h *ChatHandler) DeleteMessages(c *gin.Context) {
+	userID := c.MustGet("user_id").(uint)
+
+	var req DeleteMessagesRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := h.storage.DeleteMessages(userID, req.MessageIDs); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete messages"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message": "Messages deleted",
+		"deleted": len(req.MessageIDs),
+	})
+}
+
+type ClearChatHistoryRequest struct {
+	ChatType string `json:"chat_type" binding:"required"`
+}
+
+func (h *ChatHandler) ClearChatHistory(c *gin.Context) {
+	userID := c.MustGet("user_id").(uint)
+
+	var req ClearChatHistoryRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err := h.storage.ClearChatHistory(userID, req.ChatType); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to clear chat history"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"message":   "Chat history cleared",
+		"chat_type": req.ChatType,
 	})
 }
 

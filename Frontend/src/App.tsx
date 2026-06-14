@@ -9,7 +9,7 @@ import useAppStore from './store/useAppStore'
 
 const App = () => {
   const token = useAppStore((state) => state.token)
-  const isAuthenticated = !!token
+  const isAuthenticated = !!(token || localStorage.getItem('token'))
   const theme = useAppStore((state) => state.theme)
 
   // Apply theme globally via CSS custom properties on <html>
