@@ -219,9 +219,11 @@ func (mqs *MessageQueueService) processBatch(key string, messages []string, user
 	}
 
 	// Check if the message is relevant to the service themes.
-	// If not, return a fixed "I can't help with that" message instead of calling AI.
+	// Skip filter for image uploads — user explicitly chose to share an image,
+	// which is always relevant.
+	skipFilter := strings.Contains(joined, "[Пользователь прикрепил изображение:")
 	var aiResponse string
-	if !mqs.aiService.CheckContext(joined) {
+	if !skipFilter && !mqs.aiService.CheckContext(joined) {
 		log.Info().
 			Uint("user_id", userID).
 			Str("chat_type", chatType).

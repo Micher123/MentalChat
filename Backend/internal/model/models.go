@@ -169,6 +169,27 @@ type UserDevice struct {
 	CreatedAt    time.Time `json:"created_at"`
 }
 
+// FileAttachment stores uploaded image metadata.
+type FileAttachment struct {
+	ID        uint      `gorm:"primarykey" json:"id"`
+	UserID    uint      `gorm:"index" json:"user_id"`
+	User      User      `gorm:"foreignKey:UserID" json:"user,omitempty"`
+	ChatType  string    `gorm:"size:50" json:"chat_type"`
+	FilePath  string    `gorm:"size:500" json:"file_path"`
+	FileName  string    `gorm:"size:255" json:"file_name"`
+	FileSize  int64     `json:"file_size"`
+	MimeType  string    `gorm:"size:100" json:"mime_type"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// AllowedImageMimeTypes defines accepted image formats.
+var AllowedImageMimeTypes = map[string]bool{
+	"image/jpeg": true,
+	"image/png":  true,
+	"image/webp": true,
+	"image/gif":  true,
+}
+
 type RateLimit struct {
 	ID          uint      `gorm:"primarykey" json:"id"`
 	IP          string    `json:"ip"`

@@ -113,6 +113,7 @@ func NewPostgresDB(cfg config.DatabaseConfig) (*gorm.DB, error) {
 		&model.DDoSEntry{},
 		&model.SyncCursor{},
 		&model.UserDevice{},
+		&model.FileAttachment{},
 	); err != nil {
 		return nil, err
 	}
@@ -488,6 +489,12 @@ func (s *Storage) CreateEmailLog(log *model.EmailLog) error {
 
 func (s *Storage) UpdateEmailLog(log *model.EmailLog) error {
 	return s.db.Save(log).Error
+}
+
+// ---- FileAttachment operations ----
+
+func (s *Storage) CreateFileAttachment(attachment *model.FileAttachment) error {
+	return s.db.Create(attachment).Error
 }
 
 // ---- Delete message operations ----

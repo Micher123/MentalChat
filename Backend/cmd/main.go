@@ -58,6 +58,7 @@ func main() {
 	userHandler := handler.NewUserHandler(userService, storage)
 	voiceHandler := handler.NewVoiceHandler(aiService, storage)
 	configHandler := handler.NewConfigHandler(storage)
+	fileHandler := handler.NewFileHandler(aiService, chatIndexService, contextBuilder, storage, messageQueueService)
 
 	// Initialize router
 	router := gin.Default()
@@ -71,7 +72,7 @@ func main() {
 
 	// Setup routes
 	routes.SetupPublicRoutes(router, authHandler)
-	routes.SetupAuthRoutes(router, authHandler, chatHandler, userHandler, voiceHandler, configHandler)
+	routes.SetupAuthRoutes(router, authHandler, chatHandler, userHandler, voiceHandler, configHandler, fileHandler)
 
 	// Start server
 	addr := cfg.Server.Host + ":" + cfg.Server.Port

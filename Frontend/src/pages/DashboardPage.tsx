@@ -28,6 +28,10 @@ const DashboardPage = () => {
   const [selectedMessages, setSelectedMessages] = useState<Set<number>>(new Set())
   const [showClearConfirm, setShowClearConfirm] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [selectedFile, setSelectedFile] = useState<File | null>(null)
+  const [filePreviewUrl, setFilePreviewUrl] = useState<string | null>(null)
+  const [uploadingFile, setUploadingFile] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const settingsPanelRef = useRef<HTMLDivElement>(null)
   const profilePanelRef = useRef<HTMLDivElement>(null)
@@ -179,6 +183,130 @@ const DashboardPage = () => {
       ])
     }
   }, [user])
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    
+    // Проверка на изображение
+    if (!file.type.startsWith('image/')) {
+      alert('Выберите изображение (JPEG, PNG, WebP, GIF)')
+      return
+    }
+    
+    // Ограничение размера: 10 МБ
+    if (file.size > 10 * 1024 * 1024) {
+      alert('Файл слишком большой. Максимальный размер 10 МБ.')
+      return
+    }
+    
+    setSelectedFile(file)
+    setFilePreviewUrl(URL.createObjectURL(file))
+    // Сброс input, чтобы позволить повторный выбор того же файла
+    e.target.value = ''
+  }
+
+  const clearSelectedFile = () => {
+    if (filePreviewUrl) {
+      URL.revokeObjectURL(filePreviewUrl)
+    }
+    setSelectedFile(null)
+    setFilePreviewUrl(null)
+  }
+
+  const handleUploadFile = async () => {
+    if (!selectedFile) return
+
+    const currentInput = inputMessage
+    setUploadingFile(true)
+    setLoading(true)
+    setInputMessage('')
+
+    const startTime = Date.now()
+    const TYPING_MIN_DURATION = 800
+
+    setTypingState('entering')
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        setTypingState('visible')
+      })
+    })
+
+    try {
+      // Стабильный chatId для пары userId + chatType
+      const chatId = await chatSyncService.getOrCreateChat(user?.id || 0, currentChatType)
+
+      // Добавляем сообщение пользователя в чат сразу
+      const userMessage = {
+        id: Date.now(),
+        userId: user?.id || 0,
+        chatType: currentChatType,
+        content: currentInput || `[Изображение: ${selectedFile.name}]`,
+        isFromAI: false,
+        role: 'user' as const,
+        timestamp: new Date().toISOString(),
+      }
+      addMessage(userMessage)
+
+      if (user) {
+        await chatSyncService.addMessage(chatId, {
+          ...userMessage,
+          chatId,
+        })
+      }
+
+      const formData = new FormData()
+      formData.append('file', selectedFile)
+      formData.append('chat_type', currentChatType)
+      formData.append('content', currentInput.trim() || '')
+
+      const response = await chatApi.uploadFile(formData)
+      clearSelectedFile()
+
+      if (response.data && !response.data.queued) {
+        // Добавляем ответ AI
+        const aiMessage = {
+          id: Date.now() + 1,
+          userId: user?.id || 0,
+          chatType: currentChatType,
+          content: response.data.message,
+          isFromAI: true,
+          role: 'ai' as const,
+          timestamp: new Date().toISOString(),
+        }
+        addMessage(aiMessage)
+
+        if (user) {
+          await chatSyncService.addMessage(chatId, {
+            ...aiMessage,
+            chatId,
+          })
+        }
+      }
+    } catch (error) {
+      console.error('Error uploading file:', error)
+      alert('Не удалось загрузить файл. Попробуйте позже.')
+    } finally {
+      setUploadingFile(false)
+      setLoading(false)
+
+      const elapsed = Date.now() - startTime
+      const remaining = Math.max(0, TYPING_MIN_DURATION - elapsed)
+
+      const finishTyping = () => {
+        setTypingState('exiting')
+        typingMinTimeRef.current = setTimeout(() => {
+          setTypingState('idle')
+        }, 300)
+      }
+
+      if (remaining > 0) {
+        typingMinTimeRef.current = setTimeout(finishTyping, remaining)
+      } else {
+        finishTyping()
+      }
+    }
+  }
 
   const handleSendMessage = async () => {
     if (!inputMessage.trim()) return
@@ -1029,15 +1157,50 @@ const DashboardPage = () => {
           style={{ backgroundColor: theme.headerBg }}
         >
           <div className="flex items-center space-x-4">
-            <button 
-              className="p-3 rounded-full hover-bg-theme transition-colors"
-              style={{ color: theme.primary }}
-            >
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.172 7l-6.586 6.586a2 2 0 102.828 2.828l6.414-6.586a4 4 0 00-5.656-5.656l-6.415 6.585a6 6 0 108.486 8.486L20.5 13" />
-              </svg>
-            </button>
-            
+            {/* Hidden file input */}
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp,image/gif"
+              onChange={handleFileSelect}
+              style={{ display: 'none' }}
+            />
+
+            {/* File upload button */}
+            <div className="relative">
+              <button
+                onClick={() => {
+                  if (selectedFile) {
+                    clearSelectedFile()
+                  } else {
+                    fileInputRef.current?.click()
+                  }
+                }}
+                disabled={uploadingFile}
+                title={selectedFile ? 'Отменить выбранный файл' : 'Прикрепить изображение'}
+                className={`p-3 rounded-full transition-all transform hover:scale-105 ${
+                  selectedFile
+                    ? ''
+                    : 'hover-bg-theme'
+                }`}
+                style={
+                  selectedFile
+                    ? { backgroundColor: theme.dangerHover, color: theme.dangerText }
+                    : { color: theme.primary }
+                }
+              >
+                {selectedFile ? (
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                ) : (
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                  </svg>
+                )}
+              </button>
+            </div>
+
             <div className="flex-1 relative">
               <input
                 type="text"
@@ -1060,19 +1223,33 @@ const DashboardPage = () => {
               className="shadow-md"
             />
             
+            {/* Send button (sends text AND uploads file if selected) */}
             <button
-              onClick={handleSendMessage}
-              disabled={!inputMessage.trim() || loading}
+              onClick={() => {
+                if (selectedFile) {
+                  handleUploadFile()
+                } else {
+                  handleSendMessage()
+                }
+              }}
+              disabled={(!inputMessage.trim() && !selectedFile) || loading}
               className={`p-3 rounded-full transition-all transform hover:scale-105 ${
-                inputMessage.trim() && !loading
+                (inputMessage.trim() || selectedFile) && !loading
                   ? 'btn-theme shadow-lg'
                   : ''
               }`}
-              style={!inputMessage.trim() || loading ? { backgroundColor: theme.border, color: theme.textMuted, cursor: 'not-allowed' } : {}}
+              style={(!inputMessage.trim() && !selectedFile) || loading ? { backgroundColor: theme.border, color: theme.textMuted, cursor: 'not-allowed' } : {}}
             >
-              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-              </svg>
+              {uploadingFile ? (
+                <svg className="w-6 h-6 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+              ) : (
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
+                </svg>
+              )}
             </button>
           </div>
         </div>

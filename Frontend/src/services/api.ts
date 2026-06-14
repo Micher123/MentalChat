@@ -99,6 +99,12 @@ export const chatApi = {
     chat_type: data.chatType,
     content: data.content,
   }),
+
+  uploadFile: (formData: FormData) => api.post('/chat/upload', formData, {
+    headers: {
+      'Content-Type': undefined as any,  // Убираем json, чтобы браузер сам выставил multipart/form-data с boundary
+    },
+  }),
   
   getHistory: (data: { chatType: string; limit?: number; offset?: number }) => api.post('/chat/history', {
     chat_type: data.chatType,

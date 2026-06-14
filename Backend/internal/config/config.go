@@ -94,9 +94,11 @@ type SecurityConfig struct {
 }
 
 type StorageConfig struct {
-	VoiceStoragePath  string `mapstructure:"voice_storage_path"`
-	AvatarStoragePath string `mapstructure:"avatar_storage_path"`
-	MaxFileSizeMB     int    `mapstructure:"max_file_size_mb"`
+	VoiceStoragePath    string `mapstructure:"voice_storage_path"`
+	AvatarStoragePath   string `mapstructure:"avatar_storage_path"`
+	UploadsPath         string `mapstructure:"uploads_path"`
+	MaxFileSizeMB       int    `mapstructure:"max_file_size_mb"`
+	MaxUploadFileSizeMB int    `mapstructure:"max_upload_file_size_mb"`
 }
 
 type AppConfig struct {
@@ -169,7 +171,9 @@ func LoadConfig() *Config {
 
 		viper.SetDefault("storage.voice_storage_path", "./storage/voices")
 		viper.SetDefault("storage.avatar_storage_path", "./storage/avatars")
+		viper.SetDefault("storage.uploads_path", "./storage/uploads")
 		viper.SetDefault("storage.max_file_size_mb", 10)
+		viper.SetDefault("storage.max_upload_file_size_mb", 20)
 
 		viper.SetDefault("app.frontend_url", "http://localhost:3000")
 		viper.SetDefault("app.app_name", "MentalChat")

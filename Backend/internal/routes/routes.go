@@ -26,7 +26,7 @@ func SetupPublicRoutes(router *gin.Engine, authHandler *handler.AuthHandler) {
 	}
 }
 
-func SetupAuthRoutes(router *gin.Engine, authHandler *handler.AuthHandler, chatHandler *handler.ChatHandler, userHandler *handler.UserHandler, voiceHandler *handler.VoiceHandler, configHandler *handler.ConfigHandler) {
+func SetupAuthRoutes(router *gin.Engine, authHandler *handler.AuthHandler, chatHandler *handler.ChatHandler, userHandler *handler.UserHandler, voiceHandler *handler.VoiceHandler, configHandler *handler.ConfigHandler, fileHandler *handler.FileHandler) {
 	v1 := router.Group("/api/v1")
 	{
 		// Protected routes
@@ -70,6 +70,9 @@ func SetupAuthRoutes(router *gin.Engine, authHandler *handler.AuthHandler, chatH
 			{
 				voice.POST("/transcribe", voiceHandler.TranscribeVoice)
 			}
+
+			// File upload route
+			chat.POST("/upload", fileHandler.UploadWithMessage)
 
 			// Config routes (protected — requires auth)
 			protected.GET("/config/sync", configHandler.GetSyncConfig)
